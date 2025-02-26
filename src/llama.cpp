@@ -1338,8 +1338,9 @@ struct llm_build_context {
     }
 
     struct ggml_tensor * build_inp_KQ_mask(bool causal = true) {
+        const auto i = std::max(n_embd_head_k, n_embd_head_v);
         lctx.inp_KQ_mask = causal
-            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
+            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, cparams.flash_attn ? i * i : n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
             : ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, GGML_PAD(n_tokens, GGML_KQ_MASK_PAD));
         cb(lctx.inp_KQ_mask, "KQ_mask", -1);
         ggml_set_input(lctx.inp_KQ_mask);
