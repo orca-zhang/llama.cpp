@@ -1092,8 +1092,7 @@ struct llm_build_context {
         llama_context  & lctx,
     const llama_ubatch & ubatch,
     const llm_build_cb & cb,
-                  bool   worst_case,
-                  bool   warmup) :
+                  bool   worst_case) :
         model            (lctx.model),
         lctx             (lctx),
         hparams          (model.hparams),
@@ -1111,7 +1110,7 @@ struct llm_build_context {
         n_embd_head_v    (hparams.n_embd_head_v),
         n_embd_v_gqa     (hparams.n_embd_v_gqa()),
         n_expert         (hparams.n_expert),
-        n_expert_used    (warmup ? hparams.n_expert : hparams.n_expert_used),
+        n_expert_used    (hparams.n_expert_used),
         freq_base        (cparams.rope_freq_base),
         freq_scale       (cparams.rope_freq_scale),
         ext_factor       (cparams.yarn_ext_factor),
@@ -6405,10 +6404,6 @@ struct llm_build_context {
         // KQ_mask (mask for 1 head, it will be broadcasted to all heads)
         struct ggml_tensor * KQ_mask = build_inp_KQ_mask();
 
-        // whether to use n_tokens as the matrix dimension during multiplication or n_head
-        // n_tokens is higher during prompt processing, this allows to optimize for this case
-        bool pp_opt = true;
-
         for (int il = 0; il < n_layer; ++il) {
             struct ggml_tensor * inpSA = inpL;
 
@@ -8122,7 +8117,7 @@ static struct ggml_cgraph * llama_build_graph_defrag(llama_context & lctx, const
 
     llm_build_cb cb = [&](struct ggml_tensor * , const char * , int ) { };
 
-    struct llm_build_context llm(lctx, dummy, cb, false, false);
+    struct llm_build_context llm(lctx, dummy, cb, false);
 
     llm.init();
 
@@ -8139,7 +8134,7 @@ static struct ggml_cgraph * llama_build_graph_k_shift(llama_context & lctx) {
 
     llm_build_cb cb = [&](struct ggml_tensor * , const char * , int ) { };
 
-    struct llm_build_context llm(lctx, dummy, cb, false, false);
+    struct llm_build_context llm(lctx, dummy, cb, false);
 
     llm.init();
 
@@ -8190,11 +8185,7 @@ static struct ggml_cgraph * llama_build_graph(
 
     struct ggml_cgraph * result = NULL;
 
-    const llama_vocab * vocab = llama_model_get_vocab(&model);
-    llama_token bos = llama_vocab_bos(vocab);
-    llama_token eos = llama_vocab_eos(vocab);
-    bool is_warming_up = (ubatch.n_tokens == 2 && ubatch.token[0] == bos && ubatch.token[1] == eos);
-    struct llm_build_context llm(lctx, ubatch, cb, worst_case, is_warming_up);
+    struct llm_build_context llm(lctx, ubatch, cb, worst_case);
 
     llm.init();
 
