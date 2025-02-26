@@ -1695,6 +1695,11 @@ struct server_response {
     // This function blocks the thread until there is a response for one of the id_tasks
     server_task_result_ptr recv(const std::unordered_set<int> & id_tasks) {
         while (true) {
+            std::unique_lock<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
+                return queue_results.cbegin() != queue_results.cend();
+            });
+
             for (const auto & id_task : id_tasks) {
                 auto iter = queue_results.find(id_task);
                 if (iter != queue_results.cend()) {
@@ -1703,11 +1708,6 @@ struct server_response {
                     return res;
                 }
             }
-
-            std::unique_lock<std::mutex> lock(mutex_results);
-            condition_results.wait(lock, [&]{
-                return queue_results.cbegin() != queue_results.cend();
-            });
         }
 
         // should never reach here
@@ -1739,17 +1739,17 @@ struct server_response {
     // single-task version of recv()
     server_task_result_ptr recv(int id_task) {
         while (true) {
+            std::unique_lock<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
+                return queue_results.cbegin() != queue_results.cend();
+            });
+
             auto iter = queue_results.find(id_task);
             if (iter != queue_results.cend()) {
                 server_task_result_ptr res = iter->second;
                 queue_results.erase(id_task);
                 return res;
             }
-
-            std::unique_lock<std::mutex> lock(mutex_results);
-            condition_results.wait(lock, [&]{
-                return queue_results.cbegin() != queue_results.cend();
-            });
         }
     }
 
