@@ -74,7 +74,7 @@ void ggml_cuda_op_pad(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     GGML_ASSERT(src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16);
     GGML_ASSERT(dst->type == src0->type);
     GGML_ASSERT(src0->ne[3] == 1 && dst->ne[3] == 1); // just 3D tensors
-    GGML_LOG_INFO("ggml_cuda_op_pad: type=%d, ne0=%d, ne1=%d, ne2=%d, ne3=%d, ne0=%d, ne1=%d, ne2=%d, ne3=%d\n",
+    GGML_LOG_INFO("ggml_cuda_op_pad: type=%ld, ne0=%d, ne1=%d, ne2=%d, ne3=%d, ne0=%d, ne1=%d, ne2=%d, ne3=%d\n",
         src0->type, src0->ne[0], src0->ne[1], src0->ne[2], src0->ne[3], dst->ne[0], dst->ne[1], dst->ne[2], dst->ne[3]);
 
     if (src0->type == GGML_TYPE_F32) {
