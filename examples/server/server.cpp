@@ -516,7 +516,7 @@ struct server_task_result {
 };
 
 // using shared_ptr for polymorphism of server_task_result
-using server_task_result_ptr = std::unique_ptr<server_task_result>;
+using server_task_result_ptr = std::shared_ptr<server_task_result>;
 
 inline std::string stop_type_to_str(stop_type type) {
     switch (type) {
