@@ -3061,6 +3061,9 @@ struct ggml_tensor * ggml_reshape_2d(
         int64_t               ne0,
         int64_t               ne1) {
     GGML_ASSERT(ggml_is_contiguous(a));
+    if (ggml_nelements(a) != ne0*ne1) {
+        GGML_LOG_ERROR("ggml_reshape_2d: number of elements mismatch name: %s\n", a->name);
+    }
     GGML_ASSERT(ggml_nelements(a) == ne0*ne1);
 
     const int64_t ne[2] = { ne0, ne1 };
