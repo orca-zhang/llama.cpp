@@ -1422,7 +1422,8 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
             try {
                 info = llm_tensor_info_for(tn_tensor);
             } catch (const std::out_of_range & e) {
-                throw std::runtime_error(format("missing tensor info mapping for %s", tn.str().c_str()));
+                LLAMA_LOG_WARN("missing tensor info mapping for %s -- ignoring\n", tn.str().c_str());
+                return nullptr;
             }
 
             // skip unused tensors
@@ -2911,9 +2912,93 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                         }
 
                         layer.wkv_a_mqa = create_tensor(tn(LLM_TENSOR_ATTN_KV_A_MQA, "weight", i), {n_embd, kv_lora_rank + (n_embd_head_qk_rope)}, 0);
-                        layer.wkv_b     = create_tensor(tn(LLM_TENSOR_ATTN_KV_B,     "weight", i), {kv_lora_rank, n_head * (n_embd_head_qk_nope + n_embd_head_v)}, 0);
                         layer.wk_b      = create_tensor(tn(LLM_TENSOR_ATTN_K_B,      "weight", i), {n_embd_head_qk_nope, n_head * kv_lora_rank}, 0);
                         layer.wv_b      = create_tensor(tn(LLM_TENSOR_ATTN_V_B,      "weight", i), {kv_lora_rank, n_head * n_embd_head_v}, 0);
+                        if (!layer.wk_b || !layer.wv_b) {
+                            auto wkv_b = create_tensor(tn(LLM_TENSOR_ATTN_KV_B,     "weight", i), {kv_lora_rank, n_head * (n_embd_head_qk_nope + n_embd_head_v)}, 0);
+                            if (!wkv_b) {
+                                throw std::runtime_error("wkv_b must be defined without wk_b and wv_b");
+                            }
+
+                            // select the buffer type for this tensor
+                            buft_list_t * buft_list = pimpl->dev_input.buft_list;
+
+                            ggml_backend_buffer_type_t buft = nullptr;
+
+                            // check overrides
+                            if (ml.tensor_buft_overrides) {
+                                std::string tensor_name = "blk."+ std::to_string(i) +".attn_kv_b.weight";
+                                for (const auto * overrides = ml.tensor_buft_overrides; overrides->pattern != nullptr; ++overrides) {
+                                    std::regex pattern(overrides->pattern);
+                                    if (std::regex_search(tensor_name, pattern)) {
+                                        LLAMA_LOG_DEBUG("tensor %s buffer type overriden to %s\n", tensor_name.c_str(), ggml_backend_buft_name(overrides->buft));
+                                        buft = overrides->buft;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // avoid using a host buffer when using mmap
+                            auto * buft_dev = ggml_backend_buft_get_device(buft);
+                            if (ml.use_mmap && buft_dev && buft == ggml_backend_dev_host_buffer_type(buft_dev)) {
+                                auto * cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+                                buft = ggml_backend_dev_buffer_type(cpu_dev);
+                            }
+
+                            ggml_context * ctx = ctx_for_buft(buft);
+                            layer.wk_b = ggml_new_tensor_2d(ctx,
+                                layer.wkv_b->type,
+                                n_head_kv * kv_lora_rank,
+                                n_embd_head_qk_nope
+                            );
+                            {
+                                float *src = (float *)layer.wkv_b->data;
+                                float *dst = (float *)layer.wk_b->data;
+                                int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
+
+                                for (int h = 0; h < n_head_kv; ++h) {
+                                    int k_start = h * (n_embd_head_qk_nope + n_embd_head_v);
+                                    for (int row = 0; row < kv_lora_rank; ++row) {
+                                        for (int col = 0; col < n_embd_head_qk_nope; ++col) {
+                                            int src_idx = row * src_stride + k_start + col;
+                                            GGML_ASSERT(src_idx < ggml_nelements(layer.wkv_b));
+
+                                            int dst_row = h * kv_lora_rank + row;
+                                            int dst_col = col;
+                                            dst[dst_row * n_embd_head_qk_nope + dst_col] = src[src_idx];
+                                        }
+                                    }
+                                }
+                            }
+
+                            layer.wv_b = ggml_new_tensor_2d(
+                                ctx, 
+                                layer.wkv_b->type, 
+                                n_head_kv * n_embd_head_v,  // 行数：合并头和特征维度
+                                kv_lora_rank                // 列数：LoRA 秩
+                            );
+                            {
+                                float *src = (float *)layer.wkv_b->data;
+                                float *dst = (float *)layer.wv_b->data;
+                                int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
+
+                                for (int h = 0; h < n_head_kv; ++h) {
+                                    int v_start = h * (n_embd_head_qk_nope + n_embd_head_v) + n_embd_head_qk_nope;
+                                    for (int row = 0; row < kv_lora_rank; ++row) {
+                                        for (int col = 0; col < n_embd_head_v; ++col) {
+                                            // 源索引计算
+                                            int src_idx = row * src_stride + v_start + col;
+                                            GGML_ASSERT(src_idx < ggml_nelements(layer.wkv_b));
+
+                                            // 目标索引计算
+                                            int dst_row = h * n_embd_head_v + col; // 合并头和特征维度
+                                            int dst_col = row;                     // LoRA 秩维度
+                                            dst[dst_row * kv_lora_rank + dst_col] = src[src_idx];
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         layer.wo        = create_tensor(tn(LLM_TENSOR_ATTN_OUT,      "weight", i), {              n_head * (                      n_embd_head_v), n_embd}, 0);
 
                         layer.ffn_norm = create_tensor(tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd}, 0);
