@@ -1695,11 +1695,11 @@ struct server_response {
     // This function blocks the thread until there is a response for one of the id_tasks
     server_task_result_ptr recv(const std::unordered_set<int> & id_tasks) {
         while (true) {
-            for (size_t i = 0; i < id_tasks.size(); i++) {
-                auto iter = queue_results.find(id_tasks[i]);
+            for (const auto & id_task : id_tasks) {
+                auto iter = queue_results.find(id_task);
                 if (iter != queue_results.cend()) {
                     server_task_result_ptr res = std::move(iter->second);
-                    queue_results.erase(id_tasks[i]);
+                    queue_results.erase(id_task);
                     return res;
                 }
             }
@@ -1716,11 +1716,11 @@ struct server_response {
     // if timeout is reached, nullptr is returned
     server_task_result_ptr recv_with_timeout(const std::unordered_set<int> & id_tasks, int timeout) {
         while (true) {
-            for (size_t i = 0; i < id_tasks.size(); i++) {
-                auto iter = queue_results.find(id_tasks[i]);
+            for (const auto & id_task : id_tasks) {
+                auto iter = queue_results.find(id_task);
                 if (iter != queue_results.cend()) {
                     server_task_result_ptr res = std::move(iter->second);
-                    queue_results.erase(id_tasks[i]);
+                    queue_results.erase(id_task);
                     return res;
                 }
             }
