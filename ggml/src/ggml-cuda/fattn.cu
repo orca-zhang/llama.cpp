@@ -10,6 +10,7 @@
 
 template <int D, int ncols2>
 static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    GGML_LOG_INFO("ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1: D=%d, ncols2=%d", D, ncols2);
     const ggml_tensor * Q = dst->src[0];
 
     if (Q->ne[1] <= 8/ncols2) {
@@ -32,6 +33,7 @@ static void ggml_cuda_flash_attn_ext_mma_f16_switch_ncols1(ggml_backend_cuda_con
 
 template <int ncols2>
 static void ggml_cuda_flash_attn_ext_mma_f16_switch_hs(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    GGML_LOG_INFO("ggml_cuda_flash_attn_ext_mma_f16_switch_hs: ncols2=%d", ncols2);
     const ggml_tensor * Q = dst->src[0];
 
     switch (Q->ne[0]) {
