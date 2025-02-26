@@ -610,9 +610,7 @@ static struct ggml_tensor * llm_build_kqv(
         LLAMA_LOG_INFO("k shape: [%ld, %ld, %ld]\n", k->ne[0], k->ne[1], k->ne[2]);
         LLAMA_LOG_INFO("padded_v shape: [%ld, %ld, %ld]\n", padded_v->ne[0], padded_v->ne[1], padded_v->ne[2]);
 
-        if (v->type == GGML_TYPE_F32) {
-            ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
-        }
+        ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
 
         if (n_embd_head_v < n_embd_head_k) {
             cur = ggml_cont(ctx, ggml_reshape_3d(ctx, cur, n_embd_head_v_out, n_head, n_tokens));
