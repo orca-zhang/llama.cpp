@@ -163,6 +163,7 @@ static void ggml_cuda_flash_attn_ext_vec_f16(ggml_backend_cuda_context & ctx, gg
 
     FATTN_VEC_F16_CASE( 64, GGML_TYPE_F16, GGML_TYPE_F16)
     FATTN_VEC_F16_CASE(128, GGML_TYPE_F16, GGML_TYPE_F16)
+    FATTN_VEC_F16_CASE(192, GGML_TYPE_F16, GGML_TYPE_F16)
     FATTN_VEC_F16_CASE(256, GGML_TYPE_F16, GGML_TYPE_F16)
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
@@ -238,6 +239,7 @@ static void ggml_cuda_flash_attn_ext_vec_f32(ggml_backend_cuda_context & ctx, gg
 
     FATTN_VEC_F32_CASE( 64, GGML_TYPE_F16, GGML_TYPE_F16)
     FATTN_VEC_F32_CASE(128, GGML_TYPE_F16, GGML_TYPE_F16)
+    FATTN_VEC_F32_CASE(192, GGML_TYPE_F16, GGML_TYPE_F16)
     FATTN_VEC_F32_CASE(256, GGML_TYPE_F16, GGML_TYPE_F16)
 #endif // GGML_CUDA_FA_ALL_QUANTS
 
