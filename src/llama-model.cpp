@@ -2948,9 +2948,42 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
                             ggml_context * ctx = ctx_for_buft(buft);
 
-                            auto trans_wkv_b = ggml_cont(ctx, ggml_transpose(ctx, layer.wkv_b));
-                            layer.wk_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_qk_nope, n_head, 0);
-                            layer.wv_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_v, n_head, n_embd_head_qk_nope * n_head);
+                            // 反量化 wkv_b
+                            const auto * qtype = ggml_get_type_traits(layer.wkv_b->type);
+                            std::vector<float> dequantized_wkv_b(layer.wkv_b->ne[0] * layer.wkv_b->ne[1]);
+                            qtype->to_float(layer.wkv_b->data, dequantized_wkv_b.data(), layer.wkv_b->ne[0] * layer.wkv_b->ne[1]);
+
+                            // 创建 wk_b 和 wv_b 张量
+                            auto * wk_b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd_head_qk_nope, n_head * kv_lora_rank);
+                            auto * wv_b = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, kv_lora_rank, n_head * n_embd_head_v);
+
+                            // 分割 wkv_b 数据来生成 wk_b 和 wv_b
+                            for (int h = 0; h < n_head; ++h) {
+                                int k_start = h * (n_embd_head_qk_nope + n_embd_head_v);
+
+                                for (int row = 0; row < kv_lora_rank; ++row) {
+                                    for (int col = 0; col < n_embd_head_qk_nope; ++col) {
+                                        // 填充 wk_b
+                                        int src_idx = row * layer.wkv_b->ne[0] + k_start + col;
+                                        GGML_ASSERT(src_idx < dequantized_wkv_b.size());
+                                        int dst_row = h * kv_lora_rank + row;
+                                        int dst_col = col;
+                                        ((float*)wk_b->data)[dst_row * n_embd_head_qk_nope + dst_col] = dequantized_wkv_b[src_idx];
+                                    }
+
+                                    for (int col = 0; col < n_embd_head_v; ++col) {
+                                        // 填充 wv_b
+                                        int src_idx = row * layer.wkv_b->ne[0] + k_start + n_embd_head_qk_nope + col;
+                                        GGML_ASSERT(src_idx < dequantized_wkv_b.size());
+                                        int dst_row = row;
+                                        int dst_col = h * n_embd_head_v + col;
+                                        ((float*)wv_b->data)[dst_row * n_head * n_embd_head_v + dst_col] = dequantized_wkv_b[src_idx];
+                                    }
+                                }
+                            }
+
+                            layer.wk_b = ggml_cast(ctx, wk_b, layer.wkv_b->type);
+                            layer.wv_b = ggml_cast(ctx, wv_b, layer.wkv_b->type);
                         }
                         layer.wo        = create_tensor(tn(LLM_TENSOR_ATTN_OUT,      "weight", i), {              n_head * (                      n_embd_head_v), n_embd}, 0);
 
