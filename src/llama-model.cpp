@@ -2946,6 +2946,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                 buft = ggml_backend_dev_buffer_type(cpu_dev);
                             }
 
+                            LLAMA_LOG_INFO("wkv_b shape: [%d, %d]\n", wkv_b->ne[0], wkv_b->ne[1]);
                             LLAMA_LOG_INFO("n_head_kv: %d, kv_lora_rank: %d, n_embd_head_qk_nope: %d\n", n_head_kv, kv_lora_rank, n_embd_head_qk_nope);
                             ggml_context * ctx = ctx_for_buft(buft);
                             layer.wk_b = ggml_new_tensor_2d(ctx,
@@ -2965,6 +2966,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                         for (int col = 0; col < n_embd_head_qk_nope; ++col) {
                                             LLAMA_LOG_INFO("wk_b row: %d, col: %d\n", row, col);
                                             int src_idx = row * src_stride + k_start + col;
+                                            LLAMA_LOG_INFO("src_idx: %d\n", src_idx);
                                             GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
 
                                             int dst_row = h * kv_lora_rank + row;
@@ -2995,6 +2997,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                             LLAMA_LOG_INFO("wv_b row: %d, col: %d\n", row, col);
                                             // 源索引计算
                                             int src_idx = row * src_stride + v_start + col;
+                                            LLAMA_LOG_INFO("src_idx: %d\n", src_idx);
                                             GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
 
                                             // 目标索引计算
