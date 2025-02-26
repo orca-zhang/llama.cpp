@@ -1666,20 +1666,20 @@ struct server_response {
 
     // add the id_task to the list of tasks waiting for response
     void add_waiting_task_id(int id_task) {
-        SRV_DBG("add task %d to waiting list. current waiting = %d (before add)\n", id_task, (int) waiting_task_ids.size());
+        SRV_DBG("add task %d to waiting list. current no waiting = %d (before add)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
         waiting_task_ids.insert(id_task, 0);
     }
 
     void add_waiting_tasks(const std::vector<server_task> & tasks) {
         for (const auto & task : tasks) {
-            SRV_DBG("add task %d to waiting list. current waiting = %d (before add)\n", task.id, (int) waiting_task_ids.size());
+            SRV_DBG("add task %d to waiting list. current no waiting = %d (before add)\n", task.id, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
             waiting_task_ids.insert(task.id, 0);
         }
     }
 
     // when the request is finished, we can remove task associated with it
     void remove_waiting_task_id(int id_task) {
-        SRV_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
+        SRV_DBG("remove task %d from waiting list. current no waiting = %d (before remove)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
         waiting_task_ids.erase(id_task);
         // make sure to clean up all pending results
         queue_results.erase(id_task);
@@ -1687,7 +1687,7 @@ struct server_response {
 
     void remove_waiting_task_ids(const std::unordered_set<int> & id_tasks) {
         for (const auto & id_task : id_tasks) {
-            SRV_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
+            SRV_DBG("remove task %d from waiting list. current no waiting = %d (before remove)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
             waiting_task_ids.erase(id_task);
         }
     }
@@ -1704,7 +1704,8 @@ struct server_response {
                 }
             }
 
-            condition_results.wait(mutex_results, [&]{
+            std::lock_guard<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
                 return queue_results.cbegin() != queue_results.cend();
             });
         }
@@ -1733,7 +1734,7 @@ struct server_response {
 
         // should never reach here
     }
-
+ 
     // single-task version of recv()
     server_task_result_ptr recv(int id_task) {
         while (true) {
