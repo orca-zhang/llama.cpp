@@ -2949,8 +2949,9 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                             ggml_context * ctx = ctx_for_buft(buft);
 
                             auto trans_wkv_b = ggml_transpose(ctx, layer.wkv_b);
-                            layer.wk_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_qk_nope, n_head, 0);
-                            layer.wv_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_v, n_head, n_embd_head_qk_nope * n_head);
+                            auto wkv_b_copied = ggml_dup(ctx, trans_wkv_b);
+                            layer.wk_b = ggml_view_2d(ctx, wkv_b_copied, wkv_b_copied->ne[0], n_embd_head_qk_nope, n_head, 0);
+                            layer.wv_b = ggml_view_2d(ctx, wkv_b_copied, wkv_b_copied->ne[0], n_embd_head_v, n_head, n_embd_head_qk_nope * n_head);
                         }
                         layer.wo        = create_tensor(tn(LLM_TENSOR_ATTN_OUT,      "weight", i), {              n_head * (                      n_embd_head_v), n_embd}, 0);
 
