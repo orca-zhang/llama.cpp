@@ -582,7 +582,7 @@ static struct ggml_tensor * llm_build_kqv(
 
         // split cached v into n_head heads (not transposed)
         struct ggml_tensor * v =
-            ggml_view_3d(ctx, kv.v_l[il],
+        ggml_view_3d(ctx, kv.v_l[il],
                     n_embd_head_v, n_kv, n_head_kv,
                     ggml_row_size(kv.v_l[il]->type, n_embd_v_gqa),
                     ggml_row_size(kv.v_l[il]->type, n_embd_head_v),
@@ -592,8 +592,7 @@ static struct ggml_tensor * llm_build_kqv(
         struct ggml_tensor * padded_v = v;
         int64_t n_embd_head_v_out = n_embd_head_v;
         if (n_embd_head_v < n_embd_head_k) {
-            // Pad the feature dimension (assuming it's the third dimension, adjust indices as per actual tensor layout)
-            padded_v = ggml_pad(ctx, v, 0, 0, k->ne[2] - v->ne[2], 0); // Correct dimension for feature padding
+            padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
             cb(padded_v, "padded_v", il);
             n_embd_head_v_out = n_embd_head_k;
         }
@@ -602,6 +601,15 @@ static struct ggml_tensor * llm_build_kqv(
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
 
         ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
+
+        if (n_embd_head_v < n_embd_head_k) {
+            cur = ggml_reshape_3d(ctx, cur, n_embd_head_v_out, n_head, n_tokens);
+            cur = ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
+                               ggml_element_size(cur) * n_embd_head_v_out,
+                               ggml_element_size(cur) * n_embd_head_v_out * n_head,
+                               0);
+            cur = ggml_cont(ctx, cur);
+        }
 
         cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
     } else {
