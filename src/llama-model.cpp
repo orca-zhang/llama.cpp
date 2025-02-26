@@ -1407,7 +1407,8 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 if (flags & TENSOR_NOT_REQUIRED) {
                     return nullptr;
                 }
-                throw std::runtime_error(format("missing tensor '%s'", tn.str().c_str()));
+                LLAMA_LOG_WARN("missing tensor info mapping for %s -- ignoring\n", tn.str().c_str());
+                return nullptr;
             }
 
             // some models use the token embedding tensor as the output, but since these are used in different layers and with different ops
