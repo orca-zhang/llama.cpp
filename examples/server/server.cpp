@@ -1656,10 +1656,10 @@ private:
 
 struct server_response {
     // for keeping track of all tasks waiting for the result
-    atomic::hash_map<int, int> waiting_task_ids;
+    atomic::hash_map<int, int> waiting_task_ids = {10000};
 
     // the main result queue (using ptr for polymorphism)
-    atomic::hash_map<int, server_task_result_ptr> queue_results;
+    atomic::hash_map<int, server_task_result_ptr> queue_results = {10000};
 
     std::mutex mutex_results;
     std::condition_variable condition_results;
@@ -1726,6 +1726,7 @@ struct server_response {
                 }
             }
 
+            std::unique_lock<std::mutex> lock(mutex_results);
             std::cv_status cr_res = condition_results.wait_for(lock, std::chrono::seconds(timeout));
             if (cr_res == std::cv_status::timeout) {
                 return nullptr;
