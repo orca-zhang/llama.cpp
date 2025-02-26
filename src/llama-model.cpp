@@ -2913,11 +2913,11 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                         }
 
                         layer.wkv_a_mqa = create_tensor(tn(LLM_TENSOR_ATTN_KV_A_MQA, "weight", i), {n_embd, kv_lora_rank + (n_embd_head_qk_rope)}, 0);
+                        layer.wkv_b     = create_tensor(tn(LLM_TENSOR_ATTN_KV_B,     "weight", i), {kv_lora_rank, n_head * (n_embd_head_qk_nope + n_embd_head_v)}, 0);
                         layer.wk_b      = create_tensor(tn(LLM_TENSOR_ATTN_K_B,      "weight", i), {n_embd_head_qk_nope, n_head * kv_lora_rank}, 0);
                         layer.wv_b      = create_tensor(tn(LLM_TENSOR_ATTN_V_B,      "weight", i), {kv_lora_rank, n_head * n_embd_head_v}, 0);
                         if (!layer.wk_b || !layer.wv_b) {
-                            auto wkv_b = create_tensor(tn(LLM_TENSOR_ATTN_KV_B,     "weight", i), {kv_lora_rank, n_head * (n_embd_head_qk_nope + n_embd_head_v)}, 0);
-                            if (!wkv_b) {
+                            if (!layer.wkv_b) {
                                 throw std::runtime_error("wkv_b must be defined without wk_b and wv_b");
                             }
 
@@ -2946,69 +2946,13 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                 buft = ggml_backend_dev_buffer_type(cpu_dev);
                             }
 
-                            LLAMA_LOG_INFO("wkv_b shape: [%d, %d], type: %d\n", wkv_b->ne[0], wkv_b->ne[1], int(wkv_b->type));
+                            LLAMA_LOG_INFO("wkv_b shape: [%d, %d], type: %d\n", layer.wkv_b->ne[0], layer.wkv_b->ne[1], int(layer.wkv_b->type));
                             LLAMA_LOG_INFO("n_head_kv: %d, kv_lora_rank: %d, n_embd_head_qk_nope: %d\n", n_head_kv, kv_lora_rank, n_embd_head_qk_nope);
                             ggml_context * ctx = ctx_for_buft(buft);
-                            layer.wk_b = ggml_new_tensor_2d(ctx,
-                                wkv_b->type,
-                                n_head_kv * kv_lora_rank,
-                                n_embd_head_qk_nope
-                            );
-                            LLAMA_LOG_INFO("wk_b shape: [%d, %d]\n", layer.wk_b->ne[0], layer.wk_b->ne[1]);
-                            {
-                                float *src = (float *)wkv_b->data;
-                                float *dst = (float *)layer.wk_b->data;
-                                int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
 
-                                for (int h = 0; h < n_head_kv; ++h) {
-                                    int k_start = h * (n_embd_head_qk_nope + n_embd_head_v);
-                                    for (int row = 0; row < kv_lora_rank; ++row) {
-                                        for (int col = 0; col < n_embd_head_qk_nope; ++col) {
-                                            LLAMA_LOG_INFO("wk_b row: %d, col: %d\n", row, col);
-                                            int src_idx = row * src_stride + k_start + col;
-                                            LLAMA_LOG_INFO("src_idx: %d\n", src_idx);
-                                            GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
-
-                                            int dst_row = h * kv_lora_rank + row;
-                                            int dst_col = col;
-                                            LLAMA_LOG_INFO("wk_b dst_row: %d, dst_col: %d\n", dst_row, dst_col);
-                                            dst[dst_row * n_embd_head_qk_nope + dst_col] = src[src_idx];
-                                        }
-                                    }
-                                }
-                            }
-
-                            layer.wv_b = ggml_new_tensor_2d(
-                                ctx, 
-                                wkv_b->type, 
-                                n_head_kv * n_embd_head_v,  // 行数：合并头和特征维度
-                                kv_lora_rank                // 列数：LoRA 秩
-                            );
-                            LLAMA_LOG_INFO("wv_b shape: [%d, %d]\n", layer.wv_b->ne[0], layer.wv_b->ne[1]);
-                            {
-                                float *src = (float *)wkv_b->data;
-                                float *dst = (float *)layer.wv_b->data;
-                                int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
-
-                                for (int h = 0; h < n_head_kv; ++h) {
-                                    int v_start = h * (n_embd_head_qk_nope + n_embd_head_v) + n_embd_head_qk_nope;
-                                    for (int row = 0; row < kv_lora_rank; ++row) {
-                                        for (int col = 0; col < n_embd_head_v; ++col) {
-                                            LLAMA_LOG_INFO("wv_b row: %d, col: %d\n", row, col);
-                                            // 源索引计算
-                                            int src_idx = row * src_stride + v_start + col;
-                                            LLAMA_LOG_INFO("src_idx: %d\n", src_idx);
-                                            GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
-
-                                            // 目标索引计算
-                                            int dst_row = h * n_embd_head_v + col; // 合并头和特征维度
-                                            int dst_col = row;                     // LoRA 秩维度
-                                            LLAMA_LOG_INFO("wv_b dst_row: %d, dst_col: %d\n", dst_row, dst_col);
-                                            dst[dst_row * kv_lora_rank + dst_col] = src[src_idx];
-                                        }
-                                    }
-                                }
-                            }
+                            auto trans_wkv_b = ggml_transpose(ctx, layer.wkv_b);
+                            layer.wk_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_qk_nope, n_head, 0);
+                            layer.wv_b = ggml_view_2d(ctx, trans_wkv_b, trans_wkv_b->ne[0], n_embd_head_v, n_head, n_embd_head_qk_nope * n_head);
                         }
                         layer.wo        = create_tensor(tn(LLM_TENSOR_ATTN_OUT,      "weight", i), {              n_head * (                      n_embd_head_v), n_embd}, 0);
 
