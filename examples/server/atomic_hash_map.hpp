@@ -295,8 +295,8 @@ namespace atomic {
   friend ConstIterator;
 
   hash_map(size_t maxSize,
-                    float maxLoadFactor = 0.8f,
-                    const Allocator& alloc = Allocator())
+           float maxLoadFactor = 0.8f,
+           const Allocator& alloc = Allocator())
     : allocator_(alloc)
   {
     size_t capacity = size_t(maxSize / (maxLoadFactor > 1.0f ? 1.0f : maxLoadFactor) + 128);
