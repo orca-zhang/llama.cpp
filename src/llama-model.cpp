@@ -2948,12 +2948,13 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
                             ggml_context * ctx = ctx_for_buft(buft);
                             layer.wk_b = ggml_new_tensor_2d(ctx,
-                                layer.wkv_b->type,
+                                wkv_b->type,
                                 n_head_kv * kv_lora_rank,
                                 n_embd_head_qk_nope
                             );
+                            LLAMA_LOG_DEBUG("111\n", 0);
                             {
-                                float *src = (float *)layer.wkv_b->data;
+                                float *src = (float *)wkv_b->data;
                                 float *dst = (float *)layer.wk_b->data;
                                 int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
 
@@ -2962,7 +2963,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                     for (int row = 0; row < kv_lora_rank; ++row) {
                                         for (int col = 0; col < n_embd_head_qk_nope; ++col) {
                                             int src_idx = row * src_stride + k_start + col;
-                                            GGML_ASSERT(src_idx < ggml_nelements(layer.wkv_b));
+                                            GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
 
                                             int dst_row = h * kv_lora_rank + row;
                                             int dst_col = col;
@@ -2974,12 +2975,12 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
 
                             layer.wv_b = ggml_new_tensor_2d(
                                 ctx, 
-                                layer.wkv_b->type, 
+                                wkv_b->type, 
                                 n_head_kv * n_embd_head_v,  // 行数：合并头和特征维度
                                 kv_lora_rank                // 列数：LoRA 秩
                             );
                             {
-                                float *src = (float *)layer.wkv_b->data;
+                                float *src = (float *)wkv_b->data;
                                 float *dst = (float *)layer.wv_b->data;
                                 int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
 
@@ -2989,7 +2990,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                         for (int col = 0; col < n_embd_head_v; ++col) {
                                             // 源索引计算
                                             int src_idx = row * src_stride + v_start + col;
-                                            GGML_ASSERT(src_idx < ggml_nelements(layer.wkv_b));
+                                            GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
 
                                             // 目标索引计算
                                             int dst_row = h * n_embd_head_v + col; // 合并头和特征维度
