@@ -588,8 +588,16 @@ static struct ggml_tensor * llm_build_kqv(
                     ggml_row_size(kv.v_l[il]->type, n_embd_head_v),
                     0);
         cb(v, "v", il);
+        
+        struct ggml_tensor * padded_v = v;
+        int64_t n_embd_head_v_out = n_embd_head_v;
+        if (n_embd_head_v < n_embd_head_k) {
+            padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
+            cb(padded_v, "padded_v", il);
+            n_embd_head_v_out = n_embd_head_k;
+        }
 
-        cur = ggml_flash_attn_ext(ctx, q, k, v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
+        cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
 
         ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
@@ -9567,8 +9575,8 @@ struct llama_context * llama_init_from_model(
         params.flash_attn = false;
     }
 
-    if (params.flash_attn && model->hparams.n_embd_head_k != model->hparams.n_embd_head_v) {
-        LLAMA_LOG_WARN("%s: flash_attn requires n_embd_head_k == n_embd_head_v - forcing off\n", __func__);
+    if (params.flash_attn && model->hparams.n_embd_head_k < model->hparams.n_embd_head_v) {
+        LLAMA_LOG_WARN("%s: flash_attn requires n_embd_head_k >= n_embd_head_v - forcing off\n", __func__);
         params.flash_attn = false;
     }
 
