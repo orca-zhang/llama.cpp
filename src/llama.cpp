@@ -591,20 +591,11 @@ static struct ggml_tensor * llm_build_kqv(
 
         struct ggml_tensor * padded_v = v;
         int64_t n_embd_head_v_out = n_embd_head_v;
-        // 确保正确填充特征维度（假设v的特征维度是ne[2]）
         if (n_embd_head_v < n_embd_head_k) {
-            padded_v = ggml_pad(ctx, v, 
-                                0,              // 不填充dim 0
-                                0,              // 不填充dim 1
-                                n_embd_head_k - n_embd_head_v, // 填充特征维度dim 2
-                                0);
+            padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
             cb(padded_v, "padded_v", il);
             n_embd_head_v_out = n_embd_head_k;
         }
-
-        // 确保Flash Attention输入维度对齐
-        GGML_ASSERT(padded_v->ne[2] == k->ne[2]); // 特征维度一致
-        GGML_ASSERT(q->ne[1] == k->ne[1]);        // 序列长度一致
 
         cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
