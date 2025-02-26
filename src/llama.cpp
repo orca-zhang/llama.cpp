@@ -600,7 +600,9 @@ static struct ggml_tensor * llm_build_kqv(
         cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
 
-        ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
+        if (v->type == GGML_TYPE_F32) {
+            ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
+        }
 
         if (n_embd_head_v < n_embd_head_k) {
             cur = ggml_reshape_3d(ctx, cur, n_embd_head_v_out, n_head, n_tokens);
