@@ -588,11 +588,12 @@ static struct ggml_tensor * llm_build_kqv(
                     ggml_row_size(kv.v_l[il]->type, n_embd_head_v),
                     0);
         cb(v, "v", il);
-        
+
         struct ggml_tensor * padded_v = v;
         int64_t n_embd_head_v_out = n_embd_head_v;
         if (n_embd_head_v < n_embd_head_k) {
-            padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
+            // Pad the feature dimension (assuming it's the third dimension, adjust indices as per actual tensor layout)
+            padded_v = ggml_pad(ctx, v, 0, 0, k->ne[2] - v->ne[2], 0); // Correct dimension for feature padding
             cb(padded_v, "padded_v", il);
             n_embd_head_v_out = n_embd_head_k;
         }
