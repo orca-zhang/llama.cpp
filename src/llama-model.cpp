@@ -2946,7 +2946,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                 buft = ggml_backend_dev_buffer_type(cpu_dev);
                             }
 
-                            LLAMA_LOG_INFO("wkv_b shape: [%d, %d]\n", wkv_b->ne[0], wkv_b->ne[1]);
+                            LLAMA_LOG_INFO("wkv_b shape: [%d, %d], type: %d\n", wkv_b->ne[0], wkv_b->ne[1], int(wkv_b->type));
                             LLAMA_LOG_INFO("n_head_kv: %d, kv_lora_rank: %d, n_embd_head_qk_nope: %d\n", n_head_kv, kv_lora_rank, n_embd_head_qk_nope);
                             ggml_context * ctx = ctx_for_buft(buft);
                             layer.wk_b = ggml_new_tensor_2d(ctx,
