@@ -32,7 +32,7 @@ bool llama_kv_cache_init(
 
     cache.recurrent = llama_model_is_recurrent(&model);
     cache.v_trans   = !cache.recurrent && !cparams.flash_attn;
-    cache.can_shift = !cache.recurrent && model.arch != LLM_ARCH_DEEPSEEK2; // not supported due to MLA
+    cache.can_shift = !cache.recurrent; // not supported due to MLA
 
     LLAMA_LOG_INFO("%s: kv_size = %d, offload = %d, type_k = '%s', type_v = '%s', n_layer = %d, can_shift = %d\n",
             __func__, kv_size, offload, ggml_type_name(type_k), ggml_type_name(type_v), n_layer, cache.can_shift);
@@ -71,11 +71,6 @@ bool llama_kv_cache_init(
     cache.k_l.reserve(n_layer);
     cache.v_l.reserve(n_layer);
 
-    // DeepSeek MLA
-    cache.kr_l.reserve(n_layer);
-    cache.kv_l.reserve(n_layer);
-    cache.kvt_l.reserve(n_layer);
-
     for (int i = 0; i < n_layer; i++) {
         const uint32_t n_embd_k_gqa = hparams.n_embd_k_gqa(i) + hparams.n_embd_k_s();
         const uint32_t n_embd_v_gqa = hparams.n_embd_v_gqa(i) + hparams.n_embd_v_s();
@@ -102,20 +97,6 @@ bool llama_kv_cache_init(
         ggml_format_name(v, "cache_v_l%d", i);
         cache.k_l.push_back(k);
         cache.v_l.push_back(v);
-
-        // DeepSeek MLA
-        const uint32_t n_embd_head_qk_rope = hparams.n_rot;
-        const uint32_t kv_lora_rank = hparams.n_lora_kv;
-        LLAMA_LOG_DEBUG("%s: layer %d: n_embd_head_qk_rope = %d, kv_lora_rank = %d\n", __func__, i, n_embd_head_qk_rope, kv_lora_rank);
-        ggml_tensor * kr = ggml_new_tensor_1d(ctx, cache.type_kr, n_embd_head_qk_rope*kv_size);
-        ggml_tensor * kv = ggml_new_tensor_1d(ctx, cache.type_kv, kv_lora_rank*kv_size);
-        ggml_tensor * kvt = ggml_new_tensor_1d(ctx, cache.type_kv, kv_lora_rank*kv_size);
-        ggml_format_name(kr, "cache_kr_l%d", i);
-        ggml_format_name(kv, "cache_kv_l%d", i);
-        ggml_format_name(kvt, "cache_kvt_l%d", i);
-        cache.kr_l.push_back(kr);
-        cache.kv_l.push_back(kv);
-        cache.kvt_l.push_back(kvt);
     }
 
     // allocate tensors and initialize the buffers to avoid NaNs in the padding
