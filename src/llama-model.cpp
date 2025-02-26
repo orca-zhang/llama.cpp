@@ -2963,13 +2963,13 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                     int k_start = h * (n_embd_head_qk_nope + n_embd_head_v);
                                     for (int row = 0; row < kv_lora_rank; ++row) {
                                         for (int col = 0; col < n_embd_head_qk_nope; ++col) {
+                                            LLAMA_LOG_DEBUG("333 row: %d, col: %d\n", row, col);
                                             int src_idx = row * src_stride + k_start + col;
                                             GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
 
                                             int dst_row = h * kv_lora_rank + row;
                                             int dst_col = col;
                                             dst[dst_row * n_embd_head_qk_nope + dst_col] = src[src_idx];
-                                            LLAMA_LOG_DEBUG("333 row: %d, col: %d\n", row, col);
                                         }
                                     }
                                 }
@@ -2992,6 +2992,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                     int v_start = h * (n_embd_head_qk_nope + n_embd_head_v) + n_embd_head_qk_nope;
                                     for (int row = 0; row < kv_lora_rank; ++row) {
                                         for (int col = 0; col < n_embd_head_v; ++col) {
+                                            LLAMA_LOG_DEBUG("666 row: %d, col: %d\n", row, col);
                                             // 源索引计算
                                             int src_idx = row * src_stride + v_start + col;
                                             GGML_ASSERT(src_idx < ggml_nelements(wkv_b));
@@ -3000,7 +3001,6 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                             int dst_row = h * n_embd_head_v + col; // 合并头和特征维度
                                             int dst_col = row;                     // LoRA 秩维度
                                             dst[dst_row * kv_lora_rank + dst_col] = src[src_idx];
-                                            LLAMA_LOG_DEBUG("666 row: %d, col: %d\n", row, col);
                                         }
                                     }
                                 }
