@@ -1705,7 +1705,7 @@ struct server_response {
             }
 
             condition_results.wait(mutex_results, [&]{
-                return !queue_results.empty();
+                return queue_results.cbegin() != queue_results.cend();
             });
         }
 
@@ -1746,7 +1746,7 @@ struct server_response {
 
             std::lock_guard<std::mutex> lock(mutex_results);
             condition_results.wait(lock, [&]{
-                return !queue_results.empty();
+                return queue_results.cbegin() != queue_results.cend();
             });
         }
     }
