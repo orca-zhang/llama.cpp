@@ -1744,7 +1744,8 @@ struct server_response {
                 return res;
             }
 
-            condition_results.wait(mutex_results, [&]{
+            std::lock_guard<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
                 return !queue_results.empty();
             });
         }
