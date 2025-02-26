@@ -2958,6 +2958,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                 float *dst = (float *)layer.wk_b->data;
                                 int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
 
+                                LLAMA_LOG_DEBUG("222\n", 0);
                                 for (int h = 0; h < n_head_kv; ++h) {
                                     int k_start = h * (n_embd_head_qk_nope + n_embd_head_v);
                                     for (int row = 0; row < kv_lora_rank; ++row) {
@@ -2968,6 +2969,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                             int dst_row = h * kv_lora_rank + row;
                                             int dst_col = col;
                                             dst[dst_row * n_embd_head_qk_nope + dst_col] = src[src_idx];
+                                            LLAMA_LOG_DEBUG("333 row: %d, col: %d\n", row, col);
                                         }
                                     }
                                 }
@@ -2979,11 +2981,13 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                 n_head_kv * n_embd_head_v,  // 行数：合并头和特征维度
                                 kv_lora_rank                // 列数：LoRA 秩
                             );
+                            LLAMA_LOG_DEBUG("444\n", 0);
                             {
                                 float *src = (float *)wkv_b->data;
                                 float *dst = (float *)layer.wv_b->data;
                                 int src_stride = wkv_b->ne[0]; // 原始张量每行的元素数
 
+                                LLAMA_LOG_DEBUG("555\n", 0);
                                 for (int h = 0; h < n_head_kv; ++h) {
                                     int v_start = h * (n_embd_head_qk_nope + n_embd_head_v) + n_embd_head_qk_nope;
                                     for (int row = 0; row < kv_lora_rank; ++row) {
@@ -2996,6 +3000,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                                             int dst_row = h * n_embd_head_v + col; // 合并头和特征维度
                                             int dst_col = row;                     // LoRA 秩维度
                                             dst[dst_row * kv_lora_rank + dst_col] = src[src_idx];
+                                            LLAMA_LOG_DEBUG("666 row: %d, col: %d\n", row, col);
                                         }
                                     }
                                 }
