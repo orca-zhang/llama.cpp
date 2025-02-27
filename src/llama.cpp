@@ -605,11 +605,11 @@ static struct ggml_tensor * llm_build_kqv(
 
         if (n_embd_head_v < n_embd_head_k) {
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
-            cur = ggml_reshape_3d(ctx, cur, n_head, n_embd_head_v_out, n_tokens);
+            cur = ggml_reshape_3d(ctx, cur, n_head, n_tokens, n_embd_head_v_out);
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
-            cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_head, n_embd_head_v, n_tokens,
+            cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_head, n_tokens, n_embd_head_v,
                                ggml_element_size(cur) * n_head,
-                               ggml_element_size(cur) * n_embd_head_v_out * n_head,
+                               ggml_element_size(cur) * n_head * n_tokens,
                                0));
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
         }
