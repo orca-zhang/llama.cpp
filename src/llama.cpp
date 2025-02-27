@@ -613,7 +613,7 @@ static struct ggml_tensor * llm_build_kqv(
         ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
 
         if (n_embd_head_v < n_embd_head_k) {
-            cur = ggml_cont(ctx, ggml_reshape_3d(ctx, cur, n_embd_head_v_out, n_head, n_tokens));
+            cur = ggml_cont(ctx, cur);
             cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
                                ggml_element_size(cur) * n_embd_head_v_out,
                                ggml_element_size(cur) * n_embd_head_v_out * n_head,
