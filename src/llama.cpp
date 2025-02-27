@@ -601,26 +601,19 @@ static struct ggml_tensor * llm_build_kqv(
         cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
 
-        LLAMA_LOG_INFO("kq_scale: %f\n", kq_scale);
-
-        // 检查 Softmax 参数
-        if (hparams.attn_soft_cap) {
-            LLAMA_LOG_INFO("Soft capping applied: %f\n", hparams.f_attn_logit_softcapping);
-        }
-        LLAMA_LOG_INFO("q shape: [%ld, %ld, %ld]\n", q->ne[0], q->ne[1], q->ne[2]);
-        LLAMA_LOG_INFO("k shape: [%ld, %ld, %ld]\n", k->ne[0], k->ne[1], k->ne[2]);
-        LLAMA_LOG_INFO("padded_v shape: [%ld, %ld, %ld]\n", padded_v->ne[0], padded_v->ne[1], padded_v->ne[2]);
-
         if (cur->type == GGML_TYPE_F32) {
             ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
         }
 
         if (n_embd_head_v < n_embd_head_k) {
+            LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
             cur = ggml_reshape_3d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out, n_head, n_tokens);
+            LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
             cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
                                ggml_element_size(cur) * n_embd_head_v_out,
                                ggml_element_size(cur) * n_embd_head_v_out * n_head,
                                0));
+            LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
         }
 
         cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
