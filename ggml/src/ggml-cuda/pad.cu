@@ -57,7 +57,6 @@ static void pad_f32_cuda(const float * x, float * dst,
     dim3 gridDim(num_blocks, ne1, ne2*ne3);
     pad_f32<<<gridDim, CUDA_PAD_BLOCK_SIZE, 0, stream>>>(x, dst, ne0, ne00, ne01, ne02, ne03);
 }
-#include "ggml-impl.h"
 
 static void pad_f16_cuda(const half * x, half * dst,
     const int ne00, const int ne01, const int ne02, const int ne03,
