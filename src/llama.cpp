@@ -605,7 +605,7 @@ static struct ggml_tensor * llm_build_kqv(
 
         if (n_embd_head_v < n_embd_head_k) {
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
-            cur = ggml_reshape_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out*n_head, n_tokens);
+            cur = ggml_reshape_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out, n_head*n_tokens);
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
             cur = ggml_cont(ctx, ggml_view_2d(ctx, cur, n_embd_head_v, n_head*n_tokens,
                                ggml_element_size(cur) * n_embd_head_v_out,
