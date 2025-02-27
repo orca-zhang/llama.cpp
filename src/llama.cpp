@@ -595,6 +595,7 @@ static struct ggml_tensor * llm_build_kqv(
             padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
             cb(padded_v, "padded_v", il);
             n_embd_head_v_out = n_embd_head_k;
+            padded_v = ggml_cont(ctx, padded_v);
         }
 
         cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
