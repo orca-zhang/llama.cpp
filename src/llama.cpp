@@ -601,22 +601,19 @@ static struct ggml_tensor * llm_build_kqv(
         cur = ggml_flash_attn_ext(ctx, q, k, padded_v, kq_mask, kq_scale, hparams.f_max_alibi_bias,
                                   hparams.attn_soft_cap ? hparams.f_attn_logit_softcapping : 0.0f);
 
-        if (cur->type == GGML_TYPE_F32) {
-            ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
-        }
+        ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
 
         if (n_embd_head_v < n_embd_head_k) {
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
-            cur = ggml_reshape_3d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out, n_head, n_tokens);
+            cur = ggml_reshape_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out*n_head, n_tokens);
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
-            cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
-                               ggml_element_size(cur) * n_embd_head_v_out,
-                               ggml_element_size(cur) * n_embd_head_v_out * n_head,
+            cur = ggml_cont(ctx, ggml_view_2d(ctx, cur, n_embd_head_v* n_head, n_tokens,
+                               ggml_element_size(cur) * n_embd_head_v_out*n_head,
                                0));
             LLAMA_LOG_INFO("cur shape: [%ld, %ld, %ld]\n", cur->ne[0], cur->ne[1], cur->ne[2]);
+        } else {
+            cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
         }
-
-        cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
     } else {
         struct ggml_tensor * kq = ggml_mul_mat(ctx, k, q);
         cb(kq, "kq", il);
