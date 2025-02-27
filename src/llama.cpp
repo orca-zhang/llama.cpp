@@ -608,7 +608,7 @@ static struct ggml_tensor * llm_build_kqv(
             cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
                             ggml_row_size(cur->type, n_embd_head_v_out),
                             ggml_row_size(cur->type, n_embd_head_v_out * n_head),
-                            0));
+                            ggml_row_size(cur->type, n_embd_head_v_out * n_head * (n_embd_head_k - n_embd_head_v))));
         }
 
         cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
