@@ -590,11 +590,9 @@ static struct ggml_tensor * llm_build_kqv(
         cb(v, "v", il);
 
         struct ggml_tensor * padded_v = v;
-        int64_t n_embd_head_v_out = n_embd_head_v;
         if (n_embd_head_v < n_embd_head_k) {
             padded_v = ggml_pad(ctx, v, 0, k->ne[0] - v->ne[1], 0, 0);
             cb(padded_v, "padded_v", il);
-            n_embd_head_v_out = n_embd_head_k;
             padded_v = ggml_cont(ctx, padded_v);
         }
 
@@ -604,11 +602,7 @@ static struct ggml_tensor * llm_build_kqv(
         ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
 
         if (n_embd_head_v < n_embd_head_k) {
-            cur = ggml_reshape_3d(ctx, cur, n_embd_head_v_out, n_head, n_tokens);
-            cur = ggml_cont(ctx, ggml_view_3d(ctx, cur, n_embd_head_v, n_head, n_tokens,
-                            ggml_row_size(cur->type, n_embd_head_v_out),
-                            ggml_row_size(cur->type, n_embd_head_v_out * n_head),
-                            ggml_element_size(cur) * (n_embd_head_k - n_embd_head_v)));
+            cur = ggml_view_1d(ctx, ggml_cont(ctx, cur), n_embd_head_k*n_head, n_tokens);
         }
 
         cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
