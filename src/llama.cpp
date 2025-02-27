@@ -613,13 +613,12 @@ static struct ggml_tensor * llm_build_kqv(
         ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
 
         if (n_embd_head_v < n_embd_head_k) {
-            cur = ggml_reshape_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v_out*n_head, n_tokens);
             cur = ggml_cont(ctx, ggml_view_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v*n_head, n_tokens,
-                               ggml_element_size(cur) * n_embd_head_v_out*n_head,
+                               ggml_element_size(cur) * n_embd_head_v_out,
                                0));
-        } else {
-            cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
         }
+
+        cur = ggml_reshape_2d(ctx, cur, n_embd_head_v*n_head, n_tokens);
     } else {
         struct ggml_tensor * kq = ggml_mul_mat(ctx, k, q);
         cb(kq, "kq", il);
@@ -1338,7 +1337,7 @@ struct llm_build_context {
 
     struct ggml_tensor * build_inp_KQ_mask(bool causal = true) {
         lctx.inp_KQ_mask = causal
-            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
+            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, flash_attn ? (n_embd_head_k > n_embd_head_v ? n_embd_head_k * n_embd_head_k : n_kv) : n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
             : ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, GGML_PAD(n_tokens, GGML_KQ_MASK_PAD));
         cb(lctx.inp_KQ_mask, "KQ_mask", -1);
         ggml_set_input(lctx.inp_KQ_mask);
