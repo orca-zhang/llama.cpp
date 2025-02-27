@@ -610,7 +610,9 @@ static struct ggml_tensor * llm_build_kqv(
         LLAMA_LOG_INFO("k shape: [%ld, %ld, %ld]\n", k->ne[0], k->ne[1], k->ne[2]);
         LLAMA_LOG_INFO("padded_v shape: [%ld, %ld, %ld]\n", padded_v->ne[0], padded_v->ne[1], padded_v->ne[2]);
 
-        ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
+        if (cur->type == GGML_TYPE_F32) {
+            ggml_flash_attn_ext_set_prec(cur, GGML_PREC_F32);
+        }
 
         if (n_embd_head_v < n_embd_head_k) {
             cur = ggml_cont(ctx, ggml_view_2d(ctx, ggml_cont(ctx, cur), n_embd_head_v*n_head, n_tokens,
@@ -1337,7 +1339,7 @@ struct llm_build_context {
 
     struct ggml_tensor * build_inp_KQ_mask(bool causal = true) {
         lctx.inp_KQ_mask = causal
-            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, flash_attn ? (n_embd_head_k > n_embd_head_v ? n_embd_head_k * n_embd_head_k : n_kv) : n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
+            ? ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_kv,     GGML_PAD(n_tokens, GGML_KQ_MASK_PAD))
             : ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_tokens, GGML_PAD(n_tokens, GGML_KQ_MASK_PAD));
         cb(lctx.inp_KQ_mask, "KQ_mask", -1);
         ggml_set_input(lctx.inp_KQ_mask);
