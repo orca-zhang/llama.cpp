@@ -1497,6 +1497,7 @@ struct server_queue {
     // queues
     lock_free::linked_list<server_task> queue_tasks;
     lock_free::linked_list<server_task> queue_tasks_deferred;
+    std::atomic<int> n_queue_tasks_deferred = 0;
 
     lock_free::hash_map<int, int> cancel_tasks = {10000};
 
@@ -1543,6 +1544,7 @@ struct server_queue {
     void defer(server_task task) {
         QUE_DBG("defer task, id = %d\n", task.id);
         queue_tasks_deferred.insertHead(std::move(task));
+        n_queue_tasks_deferred++;
         condition_tasks.notify_one();
     }
 
@@ -1565,9 +1567,10 @@ struct server_queue {
     // Call when the state of one slot is changed, it will move one task from deferred to main queue
     void pop_deferred_task() {
         if (!queue_tasks_deferred.empty()) {
-            queue_tasks_deferred.sweepOnce([&](server_task & task) {
+            queue_tasks_deferred.sweepOnce([&](server_task && task) {
                 queue_tasks.insertHead(std::move(task));
             });
+            n_queue_tasks_deferred--;
         }
         condition_tasks.notify_one();
     }
@@ -1599,7 +1602,7 @@ struct server_queue {
                 if (queue_tasks.empty()) {
                     break;
                 }
-                queue_tasks.sweepOnce([&](server_task & task) {
+                queue_tasks.sweepOnce([&](server_task && task) {
                     QUE_DBG("processing task, id = %d\n", task.id);
                     if (cancel_tasks.erase(task.id) > 0) {
                         QUE_DBG("task id = %d is canceled\n", task.id);
@@ -1620,6 +1623,7 @@ struct server_queue {
                 return;
             }
             if (queue_tasks.empty()) {
+                std::unique_lock<std::mutex> lock(mutex_tasks);
                 condition_tasks.wait(lock, [&]{
                     return (!queue_tasks.empty() || !running);
                 });
@@ -2595,7 +2599,7 @@ struct server_context {
                     res->slots_data          = std::move(slots_data);
                     res->n_idle_slots        = n_idle_slots;
                     res->n_processing_slots  = n_processing_slots;
-                    res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred.size();
+                    res->n_tasks_deferred    = queue_tasks.n_queue_tasks_deferred;
                     res->t_start             = metrics.t_start;
 
                     res->kv_cache_tokens_count = llama_get_kv_cache_token_count(ctx);
