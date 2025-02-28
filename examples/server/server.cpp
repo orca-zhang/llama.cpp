@@ -18,7 +18,7 @@
 #include "index.html.gz.hpp"
 #include "loading.html.hpp"
 
-#include "atomic_hash_map.hpp"
+#include "lock-free.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -1491,12 +1491,14 @@ struct server_metrics {
 };
 
 struct server_queue {
-    int id = 0;
+    std::atomic<int> id = 0;
     bool running;
 
     // queues
-    std::deque<server_task> queue_tasks;
-    std::deque<server_task> queue_tasks_deferred;
+    lock_free::linked_list<server_task> queue_tasks;
+    lock_free::linked_list<server_task> queue_tasks_deferred;
+
+    lock_free::hash_map<int, int> cancel_tasks = {10000};
 
     std::mutex mutex_tasks;
     std::condition_variable condition_tasks;
@@ -1507,17 +1509,13 @@ struct server_queue {
 
     // Add a new task to the end of the queue
     int post(server_task task, bool front = false) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         GGML_ASSERT(task.id != -1);
         // if this is cancel task make sure to clean up pending tasks
         if (task.type == SERVER_TASK_TYPE_CANCEL) {
-            cleanup_pending_task(task.id_target);
-        }
-        QUE_DBG("new task, id = %d, front = %d\n", task.id, front);
-        if (front) {
-            queue_tasks.push_front(std::move(task));
+            cancel_tasks.insert(task.id_target, task.id_target);
         } else {
-            queue_tasks.push_back(std::move(task));
+            QUE_DBG("new task, id = %d, front = %d\n", task.id, front);
+            queue_tasks.insertHead(std::move(task));
         }
         condition_tasks.notify_one();
         return task.id;
@@ -1525,20 +1523,16 @@ struct server_queue {
 
     // multi-task version of post()
     int post(std::vector<server_task> & tasks, bool front = false) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         for (auto & task : tasks) {
             if (task.id == -1) {
                 task.id = id++;
             }
             // if this is cancel task make sure to clean up pending tasks
             if (task.type == SERVER_TASK_TYPE_CANCEL) {
-                cleanup_pending_task(task.id_target);
-            }
-            QUE_DBG("new task, id = %d/%d, front = %d\n", task.id, (int) tasks.size(), front);
-            if (front) {
-                queue_tasks.push_front(std::move(task));
+                cancel_tasks.insert(task.id_target, task.id_target);
             } else {
-                queue_tasks.push_back(std::move(task));
+                QUE_DBG("new task, id = %d/%d, front = %d\n", task.id, (int) tasks.size(), front);
+                queue_tasks.insertHead(std::move(task));
             }
         }
         condition_tasks.notify_one();
@@ -1547,15 +1541,13 @@ struct server_queue {
 
     // Add a new task, but defer until one slot is available
     void defer(server_task task) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         QUE_DBG("defer task, id = %d\n", task.id);
-        queue_tasks_deferred.push_back(std::move(task));
+        queue_tasks_deferred.insertHead(std::move(task));
         condition_tasks.notify_one();
     }
 
     // Get the next id for creating a new task
     int get_new_id() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         int new_id = id++;
         return new_id;
     }
@@ -1572,17 +1564,16 @@ struct server_queue {
 
     // Call when the state of one slot is changed, it will move one task from deferred to main queue
     void pop_deferred_task() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         if (!queue_tasks_deferred.empty()) {
-            queue_tasks.emplace_back(std::move(queue_tasks_deferred.front()));
-            queue_tasks_deferred.pop_front();
+            queue_tasks_deferred.sweepOnce([&](server_task & task) {
+                queue_tasks.insertHead(std::move(task));
+            });
         }
         condition_tasks.notify_one();
     }
 
     // end the start_loop routine
     void terminate() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         running = false;
         condition_tasks.notify_all();
     }
@@ -1601,21 +1592,21 @@ struct server_queue {
             QUE_DBG("%s", "processing new tasks\n");
 
             while (true) {
-                std::unique_lock<std::mutex> lock(mutex_tasks);
                 if (!running) {
                     QUE_DBG("%s", "terminate\n");
                     return;
                 }
                 if (queue_tasks.empty()) {
-                    lock.unlock();
                     break;
                 }
-                server_task task = queue_tasks.front();
-                queue_tasks.pop_front();
-                lock.unlock();
-
-                QUE_DBG("processing task, id = %d\n", task.id);
-                callback_new_task(std::move(task));
+                queue_tasks.sweepOnce([&](server_task & task) {
+                    QUE_DBG("processing task, id = %d\n", task.id);
+                    if (cancel_tasks.erase(task.id) > 0) {
+                        QUE_DBG("task id = %d is canceled\n", task.id);
+                        return;
+                    }
+                    callback_new_task(std::move(task));
+                });
             }
 
             // all tasks in the current loop is processed, slots data is now ready
@@ -1624,42 +1615,25 @@ struct server_queue {
             callback_update_slots();
 
             QUE_DBG("%s", "waiting for new tasks\n");
-            {
-                std::unique_lock<std::mutex> lock(mutex_tasks);
-                if (!running) {
-                    QUE_DBG("%s", "terminate\n");
-                    return;
-                }
-                if (queue_tasks.empty()) {
-                    condition_tasks.wait(lock, [&]{
-                        return (!queue_tasks.empty() || !running);
-                    });
-                }
+            if (!running) {
+                QUE_DBG("%s", "terminate\n");
+                return;
+            }
+            if (queue_tasks.empty()) {
+                condition_tasks.wait(lock, [&]{
+                    return (!queue_tasks.empty() || !running);
+                });
             }
         }
-    }
-
-private:
-    void cleanup_pending_task(int id_target) {
-        // no need lock because this is called exclusively by post()
-        auto rm_func = [id_target](const server_task & task) {
-            return task.id_target == id_target;
-        };
-        queue_tasks.erase(
-            std::remove_if(queue_tasks.begin(),          queue_tasks.end(),          rm_func),
-            queue_tasks.end());
-        queue_tasks_deferred.erase(
-            std::remove_if(queue_tasks_deferred.begin(), queue_tasks_deferred.end(), rm_func),
-            queue_tasks_deferred.end());
     }
 };
 
 struct server_response {
     // for keeping track of all tasks waiting for the result
-    atomic::hash_map<int, int> waiting_task_ids = {10000};
+    lock_free::hash_map<int, int> waiting_task_ids = {10000};
 
     // the main result queue (using ptr for polymorphism)
-    atomic::hash_map<int, server_task_result_ptr> queue_results = {10000};
+    lock_free::hash_map<int, server_task_result_ptr> queue_results = {10000};
 
     std::mutex mutex_results;
     std::condition_variable condition_results;
