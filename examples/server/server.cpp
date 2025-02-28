@@ -3934,7 +3934,7 @@ int main(int argc, char ** argv) {
 
     const auto handle_completions = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
         if (req.body.find("chat_history") != std::string::npos) {
-            res_ok(res, "");
+            res_ok(res, {{ "success", true }});
             return;
         }
 
@@ -3949,7 +3949,7 @@ int main(int argc, char ** argv) {
 
     const auto handle_completions_oai = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
         if (req.body.find("chat_history") != std::string::npos) {
-            res_ok(res, "");
+            res_ok(res, {{ "success", true }});
             return;
         }
 
@@ -4047,7 +4047,7 @@ int main(int argc, char ** argv) {
         }
 
         if (req.body.find("chat_history") != std::string::npos) {
-            res_ok(res, "");
+            res_ok(res, {{ "success", true }});
             return;
         }
 
