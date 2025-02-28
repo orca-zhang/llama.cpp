@@ -3933,6 +3933,11 @@ int main(int argc, char ** argv) {
     };
 
     const auto handle_completions = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.find("chat_history") != std::string::npos) {
+            res_ok(res, "");
+            return;
+        }
+
         json data = json::parse(req.body);
         return handle_completions_impl(
             SERVER_TASK_TYPE_COMPLETION,
@@ -3943,6 +3948,11 @@ int main(int argc, char ** argv) {
     };
 
     const auto handle_completions_oai = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+        if (req.body.find("chat_history") != std::string::npos) {
+            res_ok(res, "");
+            return;
+        }
+
         json data = oaicompat_completion_params_parse(json::parse(req.body));
         return handle_completions_impl(
             SERVER_TASK_TYPE_COMPLETION,
@@ -4033,6 +4043,11 @@ int main(int argc, char ** argv) {
         LOG_DBG("request: %s\n", req.body.c_str());
         if (ctx_server.params_base.embedding) {
             res_error(res, format_error_response("This server does not support completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
+            return;
+        }
+
+        if (req.body.find("chat_history") != std::string::npos) {
+            res_ok(res, "");
             return;
         }
 
