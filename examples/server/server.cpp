@@ -3841,6 +3841,7 @@ int main(int argc, char ** argv) {
             //SRV_DBG("Prompt: %s\n", prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
 
             if (prompt.contains("chat_history")) {
+                res_ok(res, {{ "success", true }});
                 return;
             }
 
@@ -3932,7 +3933,7 @@ int main(int argc, char ** argv) {
         }
     };
 
-    const auto handle_completions = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+    const auto handle_completions = [&handle_completions_impl, &res_ok](const httplib::Request & req, httplib::Response & res) {
         if (req.body.find("chat_history") != std::string::npos) {
             res_ok(res, {{ "success", true }});
             return;
@@ -3947,7 +3948,7 @@ int main(int argc, char ** argv) {
             OAICOMPAT_TYPE_NONE);
     };
 
-    const auto handle_completions_oai = [&handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+    const auto handle_completions_oai = [&handle_completions_impl, &res_ok](const httplib::Request & req, httplib::Response & res) {
         if (req.body.find("chat_history") != std::string::npos) {
             res_ok(res, {{ "success", true }});
             return;
@@ -4039,7 +4040,7 @@ int main(int argc, char ** argv) {
             OAICOMPAT_TYPE_NONE); // infill is not OAI compatible
     };
 
-    const auto handle_chat_completions = [&ctx_server, &params, &res_error, &handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+    const auto handle_chat_completions = [&ctx_server, &params, &res_error, &handle_completions_impl, &res_ok](const httplib::Request & req, httplib::Response & res) {
         LOG_DBG("request: %s\n", req.body.c_str());
         if (ctx_server.params_base.embedding) {
             res_error(res, format_error_response("This server does not support completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
