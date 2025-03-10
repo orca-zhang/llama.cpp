@@ -18,6 +18,8 @@
 #include "index.html.gz.hpp"
 #include "loading.html.hpp"
 
+#include "lock-free.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -522,7 +524,7 @@ struct server_task_result {
 };
 
 // using shared_ptr for polymorphism of server_task_result
-using server_task_result_ptr = std::unique_ptr<server_task_result>;
+using server_task_result_ptr = std::shared_ptr<server_task_result>;
 
 inline std::string stop_type_to_str(stop_type type) {
     switch (type) {
@@ -1497,12 +1499,15 @@ struct server_metrics {
 };
 
 struct server_queue {
-    int id = 0;
+    std::atomic<int> id = 0;
     bool running;
 
     // queues
-    std::deque<server_task> queue_tasks;
-    std::deque<server_task> queue_tasks_deferred;
+    lock_free::linked_list<server_task> queue_tasks;
+    lock_free::linked_list<server_task> queue_tasks_deferred;
+    std::atomic<int> n_queue_tasks_deferred = 0;
+
+    lock_free::hash_map<int, int> cancel_tasks = {10000};
 
     std::mutex mutex_tasks;
     std::condition_variable condition_tasks;
@@ -1513,17 +1518,13 @@ struct server_queue {
 
     // Add a new task to the end of the queue
     int post(server_task task, bool front = false) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         GGML_ASSERT(task.id != -1);
         // if this is cancel task make sure to clean up pending tasks
         if (task.type == SERVER_TASK_TYPE_CANCEL) {
-            cleanup_pending_task(task.id_target);
-        }
-        QUE_DBG("new task, id = %d, front = %d\n", task.id, front);
-        if (front) {
-            queue_tasks.push_front(std::move(task));
+            cancel_tasks.insert(task.id_target, task.id_target);
         } else {
-            queue_tasks.push_back(std::move(task));
+            QUE_DBG("new task, id = %d, front = %d\n", task.id, front);
+            queue_tasks.insertHead(std::move(task));
         }
         condition_tasks.notify_one();
         return task.id;
@@ -1531,20 +1532,16 @@ struct server_queue {
 
     // multi-task version of post()
     int post(std::vector<server_task> & tasks, bool front = false) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         for (auto & task : tasks) {
             if (task.id == -1) {
                 task.id = id++;
             }
             // if this is cancel task make sure to clean up pending tasks
             if (task.type == SERVER_TASK_TYPE_CANCEL) {
-                cleanup_pending_task(task.id_target);
-            }
-            QUE_DBG("new task, id = %d/%d, front = %d\n", task.id, (int) tasks.size(), front);
-            if (front) {
-                queue_tasks.push_front(std::move(task));
+                cancel_tasks.insert(task.id_target, task.id_target);
             } else {
-                queue_tasks.push_back(std::move(task));
+                QUE_DBG("new task, id = %d/%d, front = %d\n", task.id, (int) tasks.size(), front);
+                queue_tasks.insertHead(std::move(task));
             }
         }
         condition_tasks.notify_one();
@@ -1553,15 +1550,14 @@ struct server_queue {
 
     // Add a new task, but defer until one slot is available
     void defer(server_task task) {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         QUE_DBG("defer task, id = %d\n", task.id);
-        queue_tasks_deferred.push_back(std::move(task));
+        queue_tasks_deferred.insertHead(std::move(task));
+        n_queue_tasks_deferred++;
         condition_tasks.notify_one();
     }
 
     // Get the next id for creating a new task
     int get_new_id() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         int new_id = id++;
         return new_id;
     }
@@ -1578,17 +1574,17 @@ struct server_queue {
 
     // Call when the state of one slot is changed, it will move one task from deferred to main queue
     void pop_deferred_task() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         if (!queue_tasks_deferred.empty()) {
-            queue_tasks.emplace_back(std::move(queue_tasks_deferred.front()));
-            queue_tasks_deferred.pop_front();
+            queue_tasks_deferred.sweepOnce([&](server_task && task) {
+                queue_tasks.insertHead(std::move(task));
+            });
+            n_queue_tasks_deferred--;
         }
         condition_tasks.notify_one();
     }
 
     // end the start_loop routine
     void terminate() {
-        std::unique_lock<std::mutex> lock(mutex_tasks);
         running = false;
         condition_tasks.notify_all();
     }
@@ -1607,21 +1603,21 @@ struct server_queue {
             QUE_DBG("%s", "processing new tasks\n");
 
             while (true) {
-                std::unique_lock<std::mutex> lock(mutex_tasks);
                 if (!running) {
                     QUE_DBG("%s", "terminate\n");
                     return;
                 }
                 if (queue_tasks.empty()) {
-                    lock.unlock();
                     break;
                 }
-                server_task task = queue_tasks.front();
-                queue_tasks.pop_front();
-                lock.unlock();
-
-                QUE_DBG("processing task, id = %d\n", task.id);
-                callback_new_task(std::move(task));
+                queue_tasks.sweepOnce([&](server_task && task) {
+                    QUE_DBG("processing task, id = %d\n", task.id);
+                    if (cancel_tasks.erase(task.id) > 0) {
+                        QUE_DBG("task id = %d is canceled\n", task.id);
+                        return;
+                    }
+                    callback_new_task(std::move(task));
+                });
             }
 
             // all tasks in the current loop is processed, slots data is now ready
@@ -1630,82 +1626,54 @@ struct server_queue {
             callback_update_slots();
 
             QUE_DBG("%s", "waiting for new tasks\n");
-            {
+            if (!running) {
+                QUE_DBG("%s", "terminate\n");
+                return;
+            }
+            if (queue_tasks.empty()) {
                 std::unique_lock<std::mutex> lock(mutex_tasks);
-                if (!running) {
-                    QUE_DBG("%s", "terminate\n");
-                    return;
-                }
-                if (queue_tasks.empty()) {
-                    condition_tasks.wait(lock, [&]{
-                        return (!queue_tasks.empty() || !running);
-                    });
-                }
+                condition_tasks.wait(lock, [&]{
+                    return (!queue_tasks.empty() || !running);
+                });
             }
         }
-    }
-
-private:
-    void cleanup_pending_task(int id_target) {
-        // no need lock because this is called exclusively by post()
-        auto rm_func = [id_target](const server_task & task) {
-            return task.id_target == id_target;
-        };
-        queue_tasks.erase(
-            std::remove_if(queue_tasks.begin(),          queue_tasks.end(),          rm_func),
-            queue_tasks.end());
-        queue_tasks_deferred.erase(
-            std::remove_if(queue_tasks_deferred.begin(), queue_tasks_deferred.end(), rm_func),
-            queue_tasks_deferred.end());
     }
 };
 
 struct server_response {
     // for keeping track of all tasks waiting for the result
-    std::unordered_set<int> waiting_task_ids;
+    lock_free::hash_map<int, int> waiting_task_ids = {10000};
 
     // the main result queue (using ptr for polymorphism)
-    std::vector<server_task_result_ptr> queue_results;
+    lock_free::hash_map<int, server_task_result_ptr> queue_results = {10000};
 
     std::mutex mutex_results;
     std::condition_variable condition_results;
 
     // add the id_task to the list of tasks waiting for response
     void add_waiting_task_id(int id_task) {
-        SRV_DBG("add task %d to waiting list. current waiting = %d (before add)\n", id_task, (int) waiting_task_ids.size());
-
-        std::unique_lock<std::mutex> lock(mutex_results);
-        waiting_task_ids.insert(id_task);
+        SRV_DBG("add task %d to waiting list. current no waiting = %d (before add)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
+        waiting_task_ids.insert(id_task, 0);
     }
 
     void add_waiting_tasks(const std::vector<server_task> & tasks) {
-        std::unique_lock<std::mutex> lock(mutex_results);
-
         for (const auto & task : tasks) {
-            SRV_DBG("add task %d to waiting list. current waiting = %d (before add)\n", task.id, (int) waiting_task_ids.size());
-            waiting_task_ids.insert(task.id);
+            SRV_DBG("add task %d to waiting list. current no waiting = %d (before add)\n", task.id, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
+            waiting_task_ids.insert(task.id, 0);
         }
     }
 
     // when the request is finished, we can remove task associated with it
     void remove_waiting_task_id(int id_task) {
-        SRV_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
-
-        std::unique_lock<std::mutex> lock(mutex_results);
+        SRV_DBG("remove task %d from waiting list. current no waiting = %d (before remove)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
         waiting_task_ids.erase(id_task);
         // make sure to clean up all pending results
-        queue_results.erase(
-            std::remove_if(queue_results.begin(), queue_results.end(), [id_task](const server_task_result_ptr & res) {
-                return res->id == id_task;
-            }),
-            queue_results.end());
+        queue_results.erase(id_task);
     }
 
     void remove_waiting_task_ids(const std::unordered_set<int> & id_tasks) {
-        std::unique_lock<std::mutex> lock(mutex_results);
-
         for (const auto & id_task : id_tasks) {
-            SRV_DBG("remove task %d from waiting list. current waiting = %d (before remove)\n", id_task, (int) waiting_task_ids.size());
+            SRV_DBG("remove task %d from waiting list. current no waiting = %d (before remove)\n", id_task, queue_results.cbegin() == queue_results.cend() ? 0 : 1);
             waiting_task_ids.erase(id_task);
         }
     }
@@ -1713,18 +1681,19 @@ struct server_response {
     // This function blocks the thread until there is a response for one of the id_tasks
     server_task_result_ptr recv(const std::unordered_set<int> & id_tasks) {
         while (true) {
-            std::unique_lock<std::mutex> lock(mutex_results);
-            condition_results.wait(lock, [&]{
-                return !queue_results.empty();
-            });
-
-            for (size_t i = 0; i < queue_results.size(); i++) {
-                if (id_tasks.find(queue_results[i]->id) != id_tasks.end()) {
-                    server_task_result_ptr res = std::move(queue_results[i]);
-                    queue_results.erase(queue_results.begin() + i);
+            for (const auto & id_task : id_tasks) {
+                auto iter = queue_results.find(id_task);
+                if (iter != queue_results.cend()) {
+                    server_task_result_ptr res = iter->second;
+                    queue_results.erase(id_task);
                     return res;
                 }
             }
+
+            std::unique_lock<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
+                return queue_results.cbegin() != queue_results.cend();
+            });
         }
 
         // should never reach here
@@ -1734,16 +1703,16 @@ struct server_response {
     // if timeout is reached, nullptr is returned
     server_task_result_ptr recv_with_timeout(const std::unordered_set<int> & id_tasks, int timeout) {
         while (true) {
-            std::unique_lock<std::mutex> lock(mutex_results);
-
-            for (int i = 0; i < (int) queue_results.size(); i++) {
-                if (id_tasks.find(queue_results[i]->id) != id_tasks.end()) {
-                    server_task_result_ptr res = std::move(queue_results[i]);
-                    queue_results.erase(queue_results.begin() + i);
+            for (const auto & id_task : id_tasks) {
+                auto iter = queue_results.find(id_task);
+                if (iter != queue_results.cend()) {
+                    server_task_result_ptr res = iter->second;
+                    queue_results.erase(id_task);
                     return res;
                 }
             }
 
+            std::unique_lock<std::mutex> lock(mutex_results);
             std::cv_status cr_res = condition_results.wait_for(lock, std::chrono::seconds(timeout));
             if (cr_res == std::cv_status::timeout) {
                 return nullptr;
@@ -1752,26 +1721,34 @@ struct server_response {
 
         // should never reach here
     }
-
+ 
     // single-task version of recv()
     server_task_result_ptr recv(int id_task) {
-        std::unordered_set<int> id_tasks = {id_task};
-        return recv(id_tasks);
+        while (true) {
+            auto iter = queue_results.find(id_task);
+            if (iter != queue_results.cend()) {
+                server_task_result_ptr res = iter->second;
+                queue_results.erase(id_task);
+                return res;
+            }
+
+            std::unique_lock<std::mutex> lock(mutex_results);
+            condition_results.wait(lock, [&]{
+                return queue_results.cbegin() != queue_results.cend();
+            });
+        }
     }
 
     // Send a new result to a waiting id_task
     void send(server_task_result_ptr && result) {
         SRV_DBG("sending result for task id = %d\n", result->id);
 
-        std::unique_lock<std::mutex> lock(mutex_results);
-        for (const auto & id_task : waiting_task_ids) {
-            if (result->id == id_task) {
-                SRV_DBG("task id = %d pushed to result queue\n", result->id);
+        if (waiting_task_ids.find(result->id) != waiting_task_ids.cend()) {
+            SRV_DBG("task id = %d pushed to result queue\n", result->id);
 
-                queue_results.emplace_back(std::move(result));
-                condition_results.notify_all();
-                return;
-            }
+            queue_results.insert(result->id, std::move(result));
+            condition_results.notify_all();
+            return;
         }
     }
 };
@@ -2631,7 +2608,7 @@ struct server_context {
                     res->slots_data          = std::move(slots_data);
                     res->n_idle_slots        = n_idle_slots;
                     res->n_processing_slots  = n_processing_slots;
-                    res->n_tasks_deferred    = queue_tasks.queue_tasks_deferred.size();
+                    res->n_tasks_deferred    = queue_tasks.n_queue_tasks_deferred;
                     res->t_start             = metrics.t_start;
 
                     res->kv_cache_tokens_count = llama_get_kv_cache_token_count(ctx);
@@ -3850,6 +3827,10 @@ int main(int argc, char ** argv) {
             // TODO: this log can become very long, put it behind a flag or think about a more compact format
             //SRV_DBG("Prompt: %s\n", prompt.is_string() ? prompt.get<std::string>().c_str() : prompt.dump(2).c_str());
 
+            if (prompt.contains("chat_history")) {
+                return;
+            }
+
             std::vector<llama_tokens> tokenized_prompts = tokenize_input_prompts(ctx_server.vocab, prompt, true, true);
             tasks.reserve(tokenized_prompts.size());
             for (size_t i = 0; i < tokenized_prompts.size(); i++) {
@@ -4035,7 +4016,7 @@ int main(int argc, char ** argv) {
             OAICOMPAT_TYPE_NONE); // infill is not OAI compatible
     };
 
-    const auto handle_chat_completions = [&ctx_server, &params, &res_error, &handle_completions_impl](const httplib::Request & req, httplib::Response & res) {
+    const auto handle_chat_completions = [&ctx_server, &params, &res_error, &handle_completions_impl, &res_ok](const httplib::Request & req, httplib::Response & res) {
         LOG_DBG("request: %s\n", req.body.c_str());
         if (ctx_server.params_base.embedding) {
             res_error(res, format_error_response("This server does not support completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
